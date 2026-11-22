@@ -1,56 +1,88 @@
 name: Cloud check in action
+
 on:
   push:
     branches:
       - main
-  watch:
-    types: started
   workflow_dispatch:
   schedule:
     - cron: 35 2 * * *
+
+# 显式声明最小权限：只允许本工作流写回自己的仓库（Keep Running 需要）
+permissions:
+  contents: write
+
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
     environment: user
+    env:
+      # ── 账号配置 ──────────────────────────────────────────────
+      # 方式一：JSON 数组（单行）
+      TY_ACCOUNTS: ${{ secrets.TY_ACCOUNTS }}
+      # 方式二：按序号添加，第 1 个账号即 TY_USERNAME_1 / TY_PASSWORD_1
+      # 需要更多账号就照此往下复制，序号必须连续，遇到空值即停止读取
+      TY_USERNAME_1: ${{ secrets.TY_USERNAME_1 }}
+      TY_PASSWORD_1: ${{ secrets.TY_PASSWORD_1 }}
+      TY_USERNAME_2: ${{ secrets.TY_USERNAME_2 }}
+      TY_PASSWORD_2: ${{ secrets.TY_PASSWORD_2 }}
+      TY_USERNAME_3: ${{ secrets.TY_USERNAME_3 }}
+      TY_PASSWORD_3: ${{ secrets.TY_PASSWORD_3 }}
+      # ── 推送通道（用什么填什么，不用的留空）────────────────────
+      SENDKEY: ${{ secrets.SENDKEY }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      WECOM_BOT_KEY: ${{ secrets.WECOM_BOT_KEY }}
+      WECOM_BOT_TELPHONE: ${{ secrets.WECOM_BOT_TELPHONE }}
+      WX_PUSHER_APP_TOKEN: ${{ secrets.WX_PUSHER_APP_TOKEN }}
+      WX_PUSHER_UID: ${{ secrets.WX_PUSHER_UID }}
+      PUSH_PLUS_TOKEN: ${{ secrets.PUSH_PLUS_TOKEN }}
+      SHOWDOC_KEY: ${{ secrets.SHOWDOC_KEY }}
+      BARK_KEY: ${{ secrets.BARK_KEY }}
+      BARK_SERVER: ${{ secrets.BARK_SERVER }}
+      WPUSH_APIKEY: ${{ secrets.WPUSH_APIKEY }}
+      WPUSH_CHANNEL: ${{ secrets.WPUSH_CHANNEL }}
+      WPUSH_TOPIC_CODE: ${{ secrets.WPUSH_TOPIC_CODE }}
+      IP_ADDRESS: ${{ secrets.IP_ADDRESS }}
     steps:
+      - name: ✅ Validate config
+        run: |
+          if [ -z "$TY_ACCOUNTS" ] && [ -z "$TY_USERNAME_1" ]; then
+            echo "::error::未配置账号：请设置 TY_ACCOUNTS，或 TY_USERNAME_1 + TY_PASSWORD_1"
+            exit 1
+          fi
+          echo "账号配置检查通过"
+
       - name: 🔀 random delay 0-300 seconds
         run: sleep $((RANDOM % 301))
 
       - name: 🔌 Check out code
-        uses: actions/checkout@main
+        uses: actions/checkout@v4
 
       - name: 🔨 Setup Node.js environment
-        uses: actions/setup-node@main
+        uses: actions/setup-node@v4
         with:
           node-version: 18
           cache: npm
 
       - name: 👾 Check if Debug is true
         if: vars.debug == '1'
-        run: |
-          echo "CLOUD189_VERBOSE=1" >> $GITHUB_ENV
-      
+        run: echo "CLOUD189_VERBOSE=1" >> $GITHUB_ENV
+
       - name: 📹 Restore cached Cookie
         id: cache-cookie-restore
         uses: actions/cache/restore@v4
         with:
           path: .token
-          key: cloud189-token-${{ hashFiles('.token/*.json') }}
-          restore-keys: cloud189-token-
-
-      - name: 🔧 Init secrets
-        uses: shine1594/secrets-to-env-action@master
-        with:
-          secrets: ${{ toJSON(secrets) }}
-          secrets_env: production
-          prefix_prod: ""
-          file_name_prod: .env
+          key: cloud189-token-${{ github.repository }}-${{ hashFiles('.token/*.json') }}
+          restore-keys: |
+            cloud189-token-${{ github.repository }}-
 
       - name: 📡 Init dependencies
         run: npm install
 
       - name: 🚀 Run
-        uses: nick-fields/retry@master
+        uses: nick-fields/retry@v3
         with:
           timeout_minutes: 30
           max_attempts: 3
@@ -67,10 +99,12 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: .token
-          key: cloud189-token-${{ env.TOKEN_HASH }}
+          key: cloud189-token-${{ github.repository }}-${{ env.TOKEN_HASH }}
 
+      # 保活提交仅用于防止定时工作流因长期不活跃被停用，失败不影响签到结果
       - name: 🚗 Keep Running
         if: github.event_name == 'schedule'
+        continue-on-error: true
         run: |
           git config --local user.email "${{ github.actor_id }}+${{ github.actor }}@users.noreply.github.com"
           git config --local user.name "${{ github.actor }}"
@@ -80,7 +114,9 @@ jobs:
           git push
 
       - name: 🎉 Delete old workflow run
-        uses: Mattraks/delete-workflow-runs@main
+        if: always()
+        continue-on-error: true
+        uses: Mattraks/delete-workflow-runs@v2
         with:
           token: ${{ github.token }}
           repository: ${{ github.repository }}
