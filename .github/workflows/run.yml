@@ -8,9 +8,10 @@ on:
   schedule:
     - cron: 35 2 * * *
 
-# 显式声明最小权限：只允许本工作流写回自己的仓库（Keep Running 需要）
+# 显式声明最小权限：contents 供 Keep Running 写回，actions 供清理历史运行
 permissions:
   contents: write
+  actions: write
 
 jobs:
   build-and-deploy:
